@@ -350,6 +350,21 @@ def main():
                     and "dentro de ZIP" not in r["Tipo"])
             print(f"   • {u}  ({n} elemento(s))")
 
+    # ── Carpeta unificada con todo junto ─────────────────────────────
+    completo_dir = os.path.join(output_base, "Completo")
+    os.makedirs(completo_dir, exist_ok=True)
+    print(f"\n{'─' * 64}")
+    print("  Copiando todo a 'Completo/'...")
+    copied = 0
+    for r in all_records:
+        if "dentro de ZIP" in r["Tipo"]:
+            continue
+        src = r["Ruta destino"]
+        dst = os.path.join(completo_dir, r["Nombre archivo"])
+        if os.path.isfile(src) and safe_copy(src, dst):
+            copied += 1
+    print(f"  → {copied} elemento(s) copiado(s) a Completo/")
+
     print(f"\n{'─' * 64}")
     save_excel(all_records, output_base, "resumen_global.xlsx")
 
