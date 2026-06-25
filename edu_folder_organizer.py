@@ -91,7 +91,11 @@ def zip_folder(folder_path: str, zip_path: str) -> bool:
 
 
 def extract_html_names(html_path: str) -> dict:
-    """Devuelve {nombre_archivo: texto_visible} para <a href="recursos/…">."""
+    """
+    Devuelve {nombre_archivo: texto_visible} leyendo todos los <a href="…">
+    que apunten a un archivo con extensión conocida (PDF/Word).
+    Acepta hrefs con o sin prefijo 'recursos/'.
+    """
     names: dict = {}
     if not os.path.isfile(html_path):
         return names
@@ -100,11 +104,15 @@ def extract_html_names(html_path: str) -> dict:
             soup = BeautifulSoup(fh.read(), "html.parser")
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if re.search(r"recursos/", href, re.IGNORECASE):
-                fname = os.path.basename(re.split(r"[?#]", href)[0])
-                vname = a.get_text(strip=True)
-                if fname and vname:
-                    names[fname] = vname
+            # Quita query strings y fragmentos
+            clean = re.split(r"[?#]", href)[0].strip()
+            fname = os.path.basename(clean)
+            # Solo nos interesan archivos PDF o Word
+            if Path(fname).suffix.lower() not in ALLOWED_EXT:
+                continue
+            vname = a.get_text(strip=True)
+            if fname and vname:
+                names[fname] = vname
     except Exception as exc:
         log(f"[WARN] HTML {os.path.basename(html_path)}: {exc}", 3)
     return names
@@ -185,7 +193,13 @@ def process_folder(input_path: str, output_base: str) -> list:
         log(f"[ERROR] No existe: {work_path}", 1)
         return records
 
+    # Lee index.html desde work_path y también desde input_path (si son distintos)
+    # y combina los resultados para máxima cobertura de nombres visibles.
     root_html_names = extract_html_names(os.path.join(work_path, "index.html"))
+    if work_path != input_path:
+        root_html_names.update(
+            extract_html_names(os.path.join(input_path, "index.html"))
+        )
 
     for entry in entries:
         ep = os.path.join(work_path, entry)
