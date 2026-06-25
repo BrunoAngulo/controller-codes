@@ -291,14 +291,11 @@ def main():
 
         records = process_folder(folder_path, output_base)
 
-        # Excel individual de esta fuente va a la raíz de OUTPUT
-        save_excel(records, output_base, f"resumen_{label}.xlsx")
-
         print(f"  → {len(records)} registro(s) generado(s)")
         all_records.extend(records)
 
     print(f"\n{'─' * 64}")
-    print("  Generando Excel global...")
+    print("  Generando Excel...")
     save_excel(all_records, output_base, "resumen_global.xlsx")
 
     print(f"\n{'=' * 64}")
