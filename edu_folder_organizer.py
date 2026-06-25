@@ -19,7 +19,24 @@ from datetime import datetime
 import pandas as pd
 from bs4 import BeautifulSoup
 
+# ============================================================
+#  CONFIGURACIÓN
+# ============================================================
+
+# Solo se copian estos formatos
 ALLOWED_EXT = {".pdf", ".doc", ".docx"}
+
+# Carpetas cuyos SUBCONTENIDOS se comprimen como Libromedia.
+# El script zipea cada subcarpeta que encuentre dentro de 'recursos/'.
+# Agrega aquí el nombre de cualquier carpeta que contenga Libromedias.
+LIBROMEDIA_SOURCES = {
+    "libmed",
+}
+
+# Carpetas específicas que SIEMPRE se comprimen, sin importar dónde estén.
+ALWAYS_ZIP = {
+    "SENPAI_Asistente_cooperativo",
+}
 
 
 # ============================================================
@@ -32,16 +49,13 @@ def log(msg: str, indent: int = 0):
 
 def get_unit_folder(name: str) -> str:
     """
-    Detecta número de unidad en el nombre.
-    Acepta (case-insensitive):
-      U01, U1, U05, U5, U08, U8
-      UNIDAD01, Unidad_5, unidad 05
+    Detecta número de unidad en el nombre (case-insensitive).
+    Acepta: U01, U1, U05, U5, UNIDAD01, Unidad_5, unidad 05 …
     Retorna 'Unidad 01', 'Unidad 05' … o 'Documentos'.
     """
     m = re.search(r"(?:unidad|u)[\s_\-]*0*(\d+)", name, re.IGNORECASE)
     if m:
-        num = int(m.group(1))
-        return f"Unidad {num:02d}"
+        return f"Unidad {int(m.group(1)):02d}"
     return "Documentos"
 
 
@@ -117,10 +131,6 @@ def get_libromedia_title(html_path: str, fallback: str) -> str:
     return fallback
 
 
-def is_libromedia(folder_path: str) -> bool:
-    return os.path.isfile(os.path.join(folder_path, "index.html"))
-
-
 def save_excel(records: list, folder: str, filename: str):
     if not records:
         log("[INFO] Sin registros — Excel no generado.", 2)
@@ -139,68 +149,32 @@ def save_excel(records: list, folder: str, filename: str):
 
 
 # ============================================================
-#  EXPANSIÓN DE RUTAS DE ENTRADA
-# ============================================================
-
-def expand_input_path(input_path: str) -> list:
-    """
-    Dado un path de entrada, devuelve la lista real de carpetas a procesar.
-
-    Prioridad:
-    1. La carpeta tiene subcarpeta 'recursos'        → [input_path]
-    2. La carpeta contiene archivos PDF/Word o
-       subcarpetas Libromedia directamente            → [input_path]
-    3. Los hijos de la carpeta tienen 'recursos'     → todos esos hijos
-       (caso: se arrastra la raíz CDCOMPRI1P)
-    4. Fallback                                      → [input_path]
-    """
-    # Caso 1: tiene 'recursos'
-    if os.path.isdir(os.path.join(input_path, "recursos")):
-        return [input_path]
-
-    try:
-        entries = os.listdir(input_path)
-    except Exception:
-        return [input_path]
-
-    # Caso 2: tiene archivos PDF/Word o Libromedias directamente
-    for e in entries:
-        ep = os.path.join(input_path, e)
-        if os.path.isfile(ep) and Path(e).suffix.lower() in ALLOWED_EXT:
-            return [input_path]
-        if os.path.isdir(ep) and is_libromedia(ep):
-            return [input_path]
-
-    # Caso 3: hijos con 'recursos' (usuario arrastró la raíz)
-    children = []
-    for e in sorted(entries):
-        child = os.path.join(input_path, e)
-        if os.path.isdir(child) and os.path.isdir(os.path.join(child, "recursos")):
-            children.append(child)
-    if children:
-        log(f"[AUTO] Detectadas {len(children)} subcarpetas con 'recursos' dentro de "
-            f"{os.path.basename(input_path)}", 1)
-        return children
-
-    return [input_path]
-
-
-# ============================================================
 #  PROCESAMIENTO DE UNA CARPETA
 # ============================================================
 
 def process_folder(input_path: str, output_base: str) -> list:
     """
-    Procesa una carpeta (usa su subcarpeta 'recursos' si existe).
-    Archivos y ZIPs van directo a OUTPUT/Unidad XX/ o OUTPUT/Documentos/.
+    Procesa input_path (o su subcarpeta 'recursos/' si existe).
+
+    Regla de compresión:
+      - Si el nombre de la carpeta fuente está en LIBROMEDIA_SOURCES
+        → cada subcarpeta se comprime en ZIP.
+      - Si el nombre de una subcarpeta está en ALWAYS_ZIP
+        → esa subcarpeta específica se comprime.
+      - En cualquier otro caso solo se copian archivos PDF/Word.
     """
     folder_label = os.path.basename(input_path.rstrip("\\/"))
 
     recursos  = os.path.join(input_path, "recursos")
     work_path = recursos if os.path.isdir(recursos) else input_path
 
+    # ¿Esta carpeta fuente es una fuente de Libromedias?
+    zip_all_subfolders = folder_label.lower() in {s.lower() for s in LIBROMEDIA_SOURCES}
+
     records: list = []
     log(f"Procesando : {work_path}", 1)
+    if zip_all_subfolders:
+        log(f"[Libromedia source] Todas las subcarpetas se zipearán", 2)
 
     try:
         entries = sorted(os.listdir(work_path))
@@ -216,8 +190,12 @@ def process_folder(input_path: str, output_base: str) -> list:
     for entry in entries:
         ep = os.path.join(work_path, entry)
 
-        # ── Libromedia ────────────────────────────────────────────────
-        if os.path.isdir(ep) and is_libromedia(ep):
+        # ── Subcarpeta ────────────────────────────────────────────────
+        if os.path.isdir(ep):
+            should_zip = zip_all_subfolders or (entry in ALWAYS_ZIP)
+            if not should_zip:
+                continue  # carpeta normal → ignorar
+
             unit       = get_unit_folder(entry)
             zip_name   = f"{entry}.zip"
             zip_path   = os.path.join(output_base, unit, zip_name)
@@ -247,8 +225,6 @@ def process_folder(input_path: str, output_base: str) -> list:
             continue
 
         # ── Archivo PDF / Word ────────────────────────────────────────
-        if not os.path.isfile(ep):
-            continue
         if Path(entry).suffix.lower() not in ALLOWED_EXT:
             continue
 
@@ -271,15 +247,48 @@ def process_folder(input_path: str, output_base: str) -> list:
 
 
 # ============================================================
+#  EXPANSIÓN DE RUTAS DE ENTRADA
+# ============================================================
+
+def expand_input_path(input_path: str) -> list:
+    """
+    Si el path tiene subcarpeta 'recursos/'      → [input_path]
+    Si tiene archivos PDF/Word directamente       → [input_path]
+    Si sus hijos tienen 'recursos/' (raíz padre)  → lista de esos hijos
+    """
+    if os.path.isdir(os.path.join(input_path, "recursos")):
+        return [input_path]
+
+    try:
+        entries = os.listdir(input_path)
+    except Exception:
+        return [input_path]
+
+    for e in entries:
+        ep = os.path.join(input_path, e)
+        if os.path.isfile(ep) and Path(e).suffix.lower() in ALLOWED_EXT:
+            return [input_path]
+
+    children = [
+        os.path.join(input_path, e)
+        for e in sorted(entries)
+        if os.path.isdir(os.path.join(input_path, e))
+        and os.path.isdir(os.path.join(input_path, e, "recursos"))
+    ]
+    if children:
+        log(f"[AUTO] {len(children)} subcarpetas detectadas en "
+            f"'{os.path.basename(input_path)}'", 1)
+        return children
+
+    return [input_path]
+
+
+# ============================================================
 #  OUTPUT BASE
 # ============================================================
 
-def resolve_output_base(input_folders: list) -> str:
-    """
-    Todas las carpetas comparten padre  →  OUTPUT junto a ellas.
-    Carpetas de distintos lugares       →  Desktop/OUTPUT_Educativo.
-    """
-    parents = {os.path.dirname(p.rstrip("\\/")) for p in input_folders}
+def resolve_output_base(folders: list) -> str:
+    parents = {os.path.dirname(p.rstrip("\\/")) for p in folders}
     if len(parents) == 1:
         return os.path.join(parents.pop(), "OUTPUT")
     return os.path.join(os.path.expanduser("~"), "Desktop", "OUTPUT_Educativo")
@@ -310,11 +319,9 @@ def main():
         input("  Presiona Enter para cerrar...")
         sys.exit(1)
 
-    # Expandir carpetas padre (ej. CDCOMPRI1P → sus subcarpetas con recursos)
     folders_to_process: list = []
     for f in valid_folders:
-        expanded = expand_input_path(f)
-        folders_to_process.extend(expanded)
+        folders_to_process.extend(expand_input_path(f))
 
     output_base = resolve_output_base(folders_to_process)
     os.makedirs(output_base, exist_ok=True)
@@ -334,14 +341,14 @@ def main():
         print(f"  → {len(records)} registro(s)")
         all_records.extend(records)
 
-    # Resumen de unidades detectadas
     if all_records:
         unidades = sorted({r["Carpeta contenedora"] for r in all_records})
-        print(f"\n  Carpetas creadas en OUTPUT:")
+        print(f"\n  Carpetas generadas en OUTPUT:")
         for u in unidades:
-            count = sum(1 for r in all_records if r["Carpeta contenedora"] == u
-                        and "dentro de ZIP" not in r["Tipo"])
-            print(f"   • {u}  ({count} elemento(s))")
+            n = sum(1 for r in all_records
+                    if r["Carpeta contenedora"] == u
+                    and "dentro de ZIP" not in r["Tipo"])
+            print(f"   • {u}  ({n} elemento(s))")
 
     print(f"\n{'─' * 64}")
     save_excel(all_records, output_base, "resumen_global.xlsx")
