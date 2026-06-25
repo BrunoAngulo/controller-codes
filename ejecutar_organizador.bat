@@ -1,54 +1,37 @@
 @echo off
 chcp 65001 >nul
-title Organizador de Carpetas Educativas - CDCOMPRI1P
+title Organizador de Carpetas Educativas
 
-echo.
-echo ============================================================
-echo    ORGANIZADOR DE CARPETAS EDUCATIVAS - CDCOMPRI1P
-echo ============================================================
-echo.
+REM ── Si no hay argumentos, mostrar instrucciones ───────────────
+if "%~1"=="" (
+    echo.
+    echo  ============================================================
+    echo    ORGANIZADOR DE CARPETAS EDUCATIVAS
+    echo  ============================================================
+    echo.
+    echo  Como usar:
+    echo    1. Arrastra una o varias carpetas sobre ESTE archivo .bat
+    echo    2. O instala el menu contextual con:
+    echo       instalar_menu_contextual.bat
+    echo.
+    pause
+    exit /b 0
+)
 
-REM ── Verificar que Python este instalado ──────────────────────
+REM ── Verificar Python ──────────────────────────────────────────
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python no esta instalado o no esta en el PATH.
     echo.
-    echo  Descargalo desde: https://www.python.org/downloads/
-    echo  Asegurate de marcar "Add Python to PATH" al instalar.
+    echo  [ERROR] Python no encontrado en el sistema.
+    echo          Descargalo en: https://www.python.org/downloads/
+    echo          Marca "Add Python to PATH" durante la instalacion.
     echo.
     pause
     exit /b 1
 )
 
-echo [1/3] Python detectado:
-python --version
-echo.
+REM ── Instalar dependencias silenciosamente ─────────────────────
+pip install pandas openpyxl beautifulsoup4 --quiet --disable-pip-version-check 2>nul
 
-REM ── Instalar dependencias si hacen falta ─────────────────────
-echo [2/3] Verificando dependencias (pandas, openpyxl, beautifulsoup4)...
-pip install pandas openpyxl beautifulsoup4 --quiet --disable-pip-version-check
-if errorlevel 1 (
-    echo [WARN] No se pudieron instalar algunas dependencias.
-    echo        Si el script falla, ejecuta manualmente:
-    echo        pip install pandas openpyxl beautifulsoup4
-)
-echo.
-
-REM ── Ejecutar el organizador ───────────────────────────────────
-echo [3/3] Iniciando organizador...
-echo ============================================================
-echo.
-
-python "%~dp0edu_folder_organizer.py"
-
-echo.
-if errorlevel 1 (
-    echo [ERROR] El script termino con errores. Revisa los mensajes arriba.
-) else (
-    echo [OK] Proceso finalizado correctamente.
-    echo      Revisa la carpeta OUTPUT en:
-    echo      C:\Users\bangulo\Downloads\CDCOMPRI1P\OUTPUT
-)
-
-echo.
-pause
+REM ── Ejecutar con todas las carpetas recibidas ─────────────────
+python "%~dp0edu_folder_organizer.py" %*
