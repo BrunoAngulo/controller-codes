@@ -47,6 +47,23 @@ def log(msg: str, indent: int = 0):
     print("  " * indent + msg)
 
 
+def find_visible_name(entry: str, html_names: dict) -> str:
+    """
+    Busca el nombre visible para entry en html_names.
+    Si no hay match directo, intenta con el equivalente PDF para archivos .docx
+    (RP25_DOC_PROP_U01_CO1.docx → busca RP25_PDF_PROP_U01_CO1.pdf).
+    Fallback: stem del archivo.
+    """
+    if entry in html_names:
+        return html_names[entry]
+    p = Path(entry)
+    if p.suffix.lower() in {".doc", ".docx"}:
+        pdf_equiv = re.sub(r"_DOC_", "_PDF_", p.stem, flags=re.IGNORECASE) + ".pdf"
+        if pdf_equiv in html_names:
+            return html_names[pdf_equiv]
+    return p.stem
+
+
 def get_unit_folder(name: str) -> str:
     """
     Detecta número de unidad en el nombre (case-insensitive).
@@ -260,7 +277,7 @@ def process_folder(input_path: str, output_base: str) -> list:
 
         unit     = get_unit_folder(entry)
         dst      = os.path.join(output_base, unit, entry)
-        vis_name = root_html_names.get(entry, Path(entry).stem)
+        vis_name = find_visible_name(entry, root_html_names)
 
         log(f"[DOC ] {entry}  →  {unit}/", 2)
         if safe_copy(ep, dst):
