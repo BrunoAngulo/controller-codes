@@ -92,9 +92,11 @@ def zip_folder(folder_path: str, zip_path: str) -> bool:
 
 def extract_html_names(html_path: str) -> dict:
     """
-    Devuelve {nombre_archivo: texto_visible} leyendo todos los <a href="…">
-    que apunten a un archivo con extensión conocida (PDF/Word).
-    Acepta hrefs con o sin prefijo 'recursos/'.
+    Lee TODOS los <a href="…"> del index.html y devuelve
+    {nombre_clave: texto_visible} donde nombre_clave es:
+      - el nombre del archivo  (RP25_PDF_EL_U1_CO1.pdf  → "Ficha 01")
+      - el nombre de la carpeta (LMLACO1RAU01            → "Comprensión U01")
+    Sirve tanto para nombrar archivos copiados como ZIPs de Libromedia.
     """
     names: dict = {}
     if not os.path.isfile(html_path):
@@ -103,15 +105,17 @@ def extract_html_names(html_path: str) -> dict:
         with open(html_path, "r", encoding="utf-8", errors="ignore") as fh:
             soup = BeautifulSoup(fh.read(), "html.parser")
         for a in soup.find_all("a", href=True):
-            href = a["href"]
-            # Quita query strings y fragmentos
-            clean = re.split(r"[?#]", href)[0].strip()
+            href  = a["href"]
+            # Quita query strings, fragmentos y barras finales
+            clean = re.split(r"[?#]", href)[0].strip().rstrip("/")
+            if not clean:
+                continue
+            # Nombre = último segmento del path (archivo o carpeta)
             fname = os.path.basename(clean)
-            # Solo nos interesan archivos PDF o Word
-            if Path(fname).suffix.lower() not in ALLOWED_EXT:
+            if not fname:
                 continue
             vname = a.get_text(strip=True)
-            if fname and vname:
+            if vname:
                 names[fname] = vname
     except Exception as exc:
         log(f"[WARN] HTML {os.path.basename(html_path)}: {exc}", 3)
@@ -214,8 +218,14 @@ def process_folder(input_path: str, output_base: str) -> list:
             zip_name   = f"{entry}.zip"
             zip_path   = os.path.join(output_base, unit, zip_name)
             html_path  = os.path.join(ep, "index.html")
-            vis_name   = get_libromedia_title(html_path, entry)
             html_names = extract_html_names(html_path)
+
+            # Nombre visible: primero busca en el index del padre,
+            # luego en el título interno del Libromedia, fallback = nombre carpeta
+            vis_name = (
+                root_html_names.get(entry)
+                or get_libromedia_title(html_path, entry)
+            )
 
             log(f"[ZIP ] {entry}  →  {unit}/", 2)
             if zip_folder(ep, zip_path):
