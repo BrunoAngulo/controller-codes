@@ -113,7 +113,8 @@ def extract_html_names(html_path: str) -> dict:
     {nombre_clave: texto_visible} donde nombre_clave es:
       - el nombre del archivo  (RP25_PDF_EL_U1_CO1.pdf  → "Ficha 01")
       - el nombre de la carpeta (LMLACO1RAU01            → "Comprensión U01")
-    Sirve tanto para nombrar archivos copiados como ZIPs de Libromedia.
+    El primer nombre visible encontrado para cada clave tiene prioridad
+    (no se sobreescribe si ya existe).
     """
     names: dict = {}
     if not os.path.isfile(html_path):
@@ -138,10 +139,27 @@ def extract_html_names(html_path: str) -> dict:
             if not fname:
                 continue
             vname = a.get_text(strip=True)
-            if vname:
+            if vname and fname not in names:
                 names[fname] = vname
     except Exception as exc:
         log(f"[WARN] HTML {os.path.basename(html_path)}: {exc}", 3)
+    return names
+
+
+def collect_all_html_names(root_path: str) -> dict:
+    """
+    Recorre todo el árbol bajo root_path, lee cada index.html encontrado
+    y acumula {nombre_archivo: nombre_visible}.
+    Los archivos más cercanos a la raíz tienen prioridad (no se sobreescriben).
+    """
+    names: dict = {}
+    for dirpath, dirs, filenames in os.walk(root_path):
+        dirs.sort()
+        if "index.html" in filenames:
+            partial = extract_html_names(os.path.join(dirpath, "index.html"))
+            for k, v in partial.items():
+                if k not in names:
+                    names[k] = v
     return names
 
 
@@ -220,13 +238,13 @@ def process_folder(input_path: str, output_base: str) -> list:
         log(f"[ERROR] No existe: {work_path}", 1)
         return records
 
-    # Lee index.html desde work_path y también desde input_path (si son distintos)
-    # y combina los resultados para máxima cobertura de nombres visibles.
-    root_html_names = extract_html_names(os.path.join(work_path, "index.html"))
+    # Lee todos los index.html del árbol completo (input_path y work_path)
+    # para máxima cobertura de nombres visibles.
+    root_html_names = collect_all_html_names(input_path)
     if work_path != input_path:
-        root_html_names.update(
-            extract_html_names(os.path.join(input_path, "index.html"))
-        )
+        for k, v in collect_all_html_names(work_path).items():
+            if k not in root_html_names:
+                root_html_names[k] = v
 
     for entry in entries:
         ep = os.path.join(work_path, entry)
