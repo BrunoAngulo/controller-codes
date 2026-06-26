@@ -106,12 +106,18 @@ def extract_html_names(html_path: str) -> dict:
             soup = BeautifulSoup(fh.read(), "html.parser")
         for a in soup.find_all("a", href=True):
             href  = a["href"]
-            # Quita query strings, fragmentos y barras finales
+            # Quita query strings y fragmentos
             clean = re.split(r"[?#]", href)[0].strip().rstrip("/")
             if not clean:
                 continue
-            # Nombre = último segmento del path (archivo o carpeta)
-            fname = os.path.basename(clean)
+
+            # Si el href apunta a una carpeta via su index.html
+            # ej. "recursos/LMLACO1RAU01/index.html" → clave = "LMLACO1RAU01"
+            if re.search(r"/index\.html?$", clean, re.IGNORECASE):
+                fname = os.path.basename(os.path.dirname(clean))
+            else:
+                fname = os.path.basename(clean)
+
             if not fname:
                 continue
             vname = a.get_text(strip=True)
