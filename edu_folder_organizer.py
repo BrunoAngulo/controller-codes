@@ -50,9 +50,9 @@ def log(msg: str, indent: int = 0):
 def find_visible_name(entry: str, html_names: dict) -> str:
     """
     Busca el nombre visible para entry en html_names.
-    Si no hay match directo, intenta con el equivalente PDF para archivos .docx
-    (RP25_DOC_PROP_U01_CO1.docx → busca RP25_PDF_PROP_U01_CO1.pdf).
-    Fallback: stem del archivo.
+    1. Match directo por nombre de archivo.
+    2. Para .docx: intenta el equivalente PDF (_DOC_ → _PDF_).
+    3. Fallback: nombre de la carpeta destino (Unidad 01, Documentos, etc.).
     """
     if entry in html_names:
         return html_names[entry]
@@ -61,7 +61,7 @@ def find_visible_name(entry: str, html_names: dict) -> str:
         pdf_equiv = re.sub(r"_DOC_", "_PDF_", p.stem, flags=re.IGNORECASE) + ".pdf"
         if pdf_equiv in html_names:
             return html_names[pdf_equiv]
-    return p.stem
+    return get_unit_folder(entry)
 
 
 def get_unit_folder(name: str) -> str:
@@ -107,13 +107,38 @@ def zip_folder(folder_path: str, zip_path: str) -> bool:
     return False
 
 
+def _infer_fname_from_vname(template_fname: str, vname: str) -> str | None:
+    """
+    Cuando el mismo href se repite con distintos textos visibles (bug copy-paste),
+    intenta inferir el nombre real del archivo sustituyendo el número de unidad
+    del texto visible en el patrón del href.
+
+    Ejemplo:
+      template_fname = "RA25_PDF_LAM_U01_CO2.pdf"
+      vname          = "Unidad 02"
+      → "RA25_PDF_LAM_U02_CO2.pdf"
+    """
+    m = re.search(r"(?:unidad|u)\s*0*(\d+)", vname, re.IGNORECASE)
+    if not m:
+        return None
+    unit_num = int(m.group(1))
+    p = Path(template_fname)
+    new_stem = re.sub(r"_U\d+_", f"_U{unit_num:02d}_", p.stem, count=1, flags=re.IGNORECASE)
+    if new_stem == p.stem:
+        return None
+    return new_stem + p.suffix
+
+
 def extract_html_names(html_path: str) -> dict:
     """
     Lee TODOS los <a href="…"> del index.html y devuelve
     {nombre_clave: texto_visible} donde nombre_clave es:
       - el nombre del archivo  (RP25_PDF_EL_U1_CO1.pdf  → "Ficha 01")
       - el nombre de la carpeta (LMLACO1RAU01            → "Comprensión U01")
-    Sirve tanto para nombrar archivos copiados como ZIPs de Libromedia.
+
+    Cuando el mismo href aparece varias veces con distintos textos visibles
+    (bug de copia-pega en el HTML), infiere el nombre real del archivo a
+    partir del número de unidad del texto visible.
     """
     names: dict = {}
     if not os.path.isfile(html_path):
@@ -123,13 +148,10 @@ def extract_html_names(html_path: str) -> dict:
             soup = BeautifulSoup(fh.read(), "html.parser")
         for a in soup.find_all("a", href=True):
             href  = a["href"]
-            # Quita query strings y fragmentos
             clean = re.split(r"[?#]", href)[0].strip().rstrip("/")
             if not clean:
                 continue
 
-            # Si el href apunta a una carpeta via su index.html
-            # ej. "recursos/LMLACO1RAU01/index.html" → clave = "LMLACO1RAU01"
             if re.search(r"/index\.html?$", clean, re.IGNORECASE):
                 fname = os.path.basename(os.path.dirname(clean))
             else:
@@ -138,10 +160,35 @@ def extract_html_names(html_path: str) -> dict:
             if not fname:
                 continue
             vname = a.get_text(strip=True)
-            if vname:
+            if not vname:
+                continue
+
+            if fname not in names:
                 names[fname] = vname
+            else:
+                # Href duplicado: intenta inferir el nombre real del archivo
+                inferred = _infer_fname_from_vname(fname, vname)
+                if inferred and inferred not in names:
+                    names[inferred] = vname
     except Exception as exc:
         log(f"[WARN] HTML {os.path.basename(html_path)}: {exc}", 3)
+    return names
+
+
+def collect_all_html_names(root_path: str) -> dict:
+    """
+    Recorre todo el árbol bajo root_path, lee cada index.html encontrado
+    y acumula {nombre_archivo: nombre_visible}.
+    Los archivos más cercanos a la raíz tienen prioridad (no se sobreescriben).
+    """
+    names: dict = {}
+    for dirpath, dirs, filenames in os.walk(root_path):
+        dirs.sort()
+        if "index.html" in filenames:
+            partial = extract_html_names(os.path.join(dirpath, "index.html"))
+            for k, v in partial.items():
+                if k not in names:
+                    names[k] = v
     return names
 
 
@@ -220,13 +267,13 @@ def process_folder(input_path: str, output_base: str) -> list:
         log(f"[ERROR] No existe: {work_path}", 1)
         return records
 
-    # Lee index.html desde work_path y también desde input_path (si son distintos)
-    # y combina los resultados para máxima cobertura de nombres visibles.
-    root_html_names = extract_html_names(os.path.join(work_path, "index.html"))
+    # Lee todos los index.html del árbol completo (input_path y work_path)
+    # para máxima cobertura de nombres visibles.
+    root_html_names = collect_all_html_names(input_path)
     if work_path != input_path:
-        root_html_names.update(
-            extract_html_names(os.path.join(input_path, "index.html"))
-        )
+        for k, v in collect_all_html_names(work_path).items():
+            if k not in root_html_names:
+                root_html_names[k] = v
 
     for entry in entries:
         ep = os.path.join(work_path, entry)
