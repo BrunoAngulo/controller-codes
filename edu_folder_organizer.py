@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 Organizador de Carpetas Educativas
-Uso:
-  - Arrastra una o varias carpetas sobre ejecutar_organizador.bat
-  - Clic derecho → "Enviar a" → Organizar carpeta educativa
-  - Clic derecho → "Organizar carpeta educativa"
+Primaria:
+  - Arrastra carpetas sobre ejecutar_organizador_primaria.bat
+Secundaria:
+  - Arrastra carpetas sobre ejecutar_organizador_secundaria.bat
 """
 
 import os
@@ -389,16 +389,173 @@ def resolve_output_base(folders: list) -> str:
 
 
 # ============================================================
+#  PROCESAMIENTO SECUNDARIA
+# ============================================================
+
+def process_secondary_folder(root_path: str, output_base: str) -> list:
+    """
+    Procesa una carpeta de secundaria con estructura numerada.
+
+    Estructura esperada:
+      root_path/
+        01/                   ← Unidad 01
+          CDMAT*A/recursos/   ← alumno
+          CDMAT*P/recursos/   ← profesor
+          LMLA*/              ← se zipea
+          LMTE*/              ← se zipea
+        02/ ...
+        (archivos en la raíz) → Documentos
+    """
+    folder_label = os.path.basename(root_path.rstrip("\\/"))
+    records: list = []
+
+    log(f"Procesando (secundaria): {root_path}", 1)
+
+    html_names = collect_all_html_names(root_path)
+
+    try:
+        root_entries = sorted(os.listdir(root_path))
+    except Exception as exc:
+        log(f"[ERROR] No se pudo listar: {root_path}: {exc}", 1)
+        return records
+
+    # ── Archivos en la raíz → Documentos ─────────────────────────────
+    for entry in root_entries:
+        ep = os.path.join(root_path, entry)
+        if os.path.isfile(ep) and Path(entry).suffix.lower() in ALLOWED_EXT:
+            dst      = os.path.join(output_base, "Documentos", entry)
+            vis_name = find_visible_name(entry, html_names)
+            log(f"[DOC ] {entry}  →  Documentos/", 2)
+            if safe_copy(ep, dst):
+                records.append({
+                    "Nombre visible":      vis_name,
+                    "Nombre archivo":      entry,
+                    "Ruta destino":        dst,
+                    "Tipo":                "ARCHIVO",
+                    "Carpeta contenedora": "Documentos",
+                    "Carpeta fuente":      folder_label,
+                })
+
+    # ── Carpetas numeradas (unidades) ─────────────────────────────────
+    unit_re    = re.compile(r"^\d+$")
+    alumno_re  = re.compile(r"^CDMAT.*A$", re.IGNORECASE)
+    profesor_re = re.compile(r"^CDMAT.*P$", re.IGNORECASE)
+
+    for entry in root_entries:
+        ep = os.path.join(root_path, entry)
+        if not os.path.isdir(ep) or not unit_re.match(entry):
+            continue
+
+        unit_label = f"Unidad {int(entry):02d}"
+        log(f"\n  {unit_label} ({entry}/)", 1)
+
+        try:
+            sub_entries = sorted(os.listdir(ep))
+        except Exception:
+            continue
+
+        alumno_dir  = None
+        profesor_dir = None
+        zip_dirs    = []
+
+        for sub in sub_entries:
+            sp = os.path.join(ep, sub)
+            if not os.path.isdir(sp):
+                continue
+            su = sub.upper()
+            if su.startswith("LMLA") or su.startswith("LMTE"):
+                zip_dirs.append(sp)
+            elif alumno_re.match(sub):
+                alumno_dir = sp
+            elif profesor_re.match(sub):
+                profesor_dir = sp
+
+        # ZIP LMLA* y LMTE*
+        for lm_dir in zip_dirs:
+            lm_name  = os.path.basename(lm_dir)
+            zip_name = f"{lm_name}.zip"
+            zip_path = os.path.join(output_base, unit_label, zip_name)
+            vis_name = html_names.get(lm_name) or lm_name
+            log(f"[ZIP ] {lm_name}  →  {unit_label}/", 2)
+            if zip_folder(lm_dir, zip_path):
+                records.append({
+                    "Nombre visible":      vis_name,
+                    "Nombre archivo":      zip_name,
+                    "Ruta destino":        zip_path,
+                    "Tipo":                "CARPETA/ZIP",
+                    "Carpeta contenedora": unit_label,
+                    "Carpeta fuente":      folder_label,
+                })
+
+        if not alumno_dir:
+            log(f"[WARN] Sin carpeta alumno (CDMAT*A) en {entry}/", 2)
+        if not profesor_dir:
+            log(f"[WARN] Sin carpeta profesor (CDMAT*P) en {entry}/", 2)
+        if not alumno_dir or not profesor_dir:
+            continue
+
+        # Intersección de recursos/
+        alumno_rec   = os.path.join(alumno_dir,  "recursos")
+        profesor_rec = os.path.join(profesor_dir, "recursos")
+
+        if not os.path.isdir(alumno_rec) or not os.path.isdir(profesor_rec):
+            log(f"[WARN] Falta carpeta 'recursos' en {entry}/", 2)
+            continue
+
+        try:
+            common = sorted(set(os.listdir(alumno_rec)) & set(os.listdir(profesor_rec)))
+        except Exception as exc:
+            log(f"[ERROR] Listando recursos: {exc}", 2)
+            continue
+
+        log(f"  Intersección: {len(common)} elemento(s)", 2)
+
+        for res_entry in common:
+            rep = os.path.join(alumno_rec, res_entry)
+
+            if os.path.isdir(rep):
+                zip_name = f"{res_entry}.zip"
+                zip_path = os.path.join(output_base, unit_label, zip_name)
+                vis_name = html_names.get(res_entry) or res_entry
+                log(f"[ZIP ] {res_entry}  →  {unit_label}/", 2)
+                if zip_folder(rep, zip_path):
+                    records.append({
+                        "Nombre visible":      vis_name,
+                        "Nombre archivo":      zip_name,
+                        "Ruta destino":        zip_path,
+                        "Tipo":                "CARPETA/ZIP",
+                        "Carpeta contenedora": unit_label,
+                        "Carpeta fuente":      folder_label,
+                    })
+
+            elif os.path.isfile(rep) and Path(res_entry).suffix.lower() in ALLOWED_EXT:
+                dst      = os.path.join(output_base, unit_label, res_entry)
+                vis_name = find_visible_name(res_entry, html_names)
+                log(f"[DOC ] {res_entry}  →  {unit_label}/", 2)
+                if safe_copy(rep, dst):
+                    records.append({
+                        "Nombre visible":      vis_name,
+                        "Nombre archivo":      res_entry,
+                        "Ruta destino":        dst,
+                        "Tipo":                "ARCHIVO",
+                        "Carpeta contenedora": unit_label,
+                        "Carpeta fuente":      folder_label,
+                    })
+
+    return records
+
+
+# ============================================================
 #  MAIN
 # ============================================================
 
-def main():
+def main_primaria():
     print("=" * 64)
-    print("   ORGANIZADOR DE CARPETAS EDUCATIVAS")
+    print("   ORGANIZADOR DE CARPETAS EDUCATIVAS — PRIMARIA")
     print(f"   {datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}")
     print("=" * 64)
 
-    raw_args      = sys.argv[1:]
+    raw_args      = [a for a in sys.argv[1:] if a != "--primaria"]
     valid_folders = [os.path.normpath(a) for a in raw_args if os.path.isdir(a)]
 
     if not valid_folders:
@@ -406,7 +563,7 @@ def main():
         print("  No se recibieron carpetas válidas.")
         print()
         print("  Formas de uso:")
-        print("   1. Arrastra carpetas sobre 'ejecutar_organizador.bat'")
+        print("   1. Arrastra carpetas sobre 'ejecutar_organizador_primaria.bat'")
         print("   2. Clic derecho → 'Enviar a' → Organizar carpeta educativa")
         print("   3. Clic derecho → 'Organizar carpeta educativa'")
         print()
@@ -470,5 +627,80 @@ def main():
     input("  Presiona Enter para cerrar...")
 
 
+def main_secundaria():
+    print("=" * 64)
+    print("   ORGANIZADOR DE CARPETAS EDUCATIVAS — SECUNDARIA")
+    print(f"   {datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}")
+    print("=" * 64)
+
+    raw_args      = [a for a in sys.argv[1:] if a != "--secundaria"]
+    valid_folders = [os.path.normpath(a) for a in raw_args if os.path.isdir(a)]
+
+    if not valid_folders:
+        print()
+        print("  No se recibieron carpetas válidas.")
+        print()
+        print("  Formas de uso:")
+        print("   1. Arrastra carpetas sobre 'ejecutar_organizador_secundaria.bat'")
+        print("   2. Clic derecho → 'Organizar carpeta educativa (secundaria)'")
+        print()
+        input("  Presiona Enter para cerrar...")
+        sys.exit(1)
+
+    output_base = resolve_output_base(valid_folders)
+    os.makedirs(output_base, exist_ok=True)
+
+    print(f"\n  Carpetas a procesar : {len(valid_folders)}")
+    print(f"  Salida              : {output_base}\n")
+
+    all_records: list = []
+
+    for folder_path in valid_folders:
+        label = os.path.basename(folder_path)
+        print(f"\n{'─' * 64}")
+        print(f"  {label}")
+        print(f"{'─' * 64}")
+
+        records = process_secondary_folder(folder_path, output_base)
+        print(f"  → {len(records)} registro(s)")
+        all_records.extend(records)
+
+    if all_records:
+        unidades = sorted({r["Carpeta contenedora"] for r in all_records})
+        print(f"\n  Carpetas generadas en OUTPUT:")
+        for u in unidades:
+            n = sum(1 for r in all_records
+                    if r["Carpeta contenedora"] == u
+                    and "dentro de ZIP" not in r["Tipo"])
+            print(f"   • {u}  ({n} elemento(s))")
+
+    completo_dir = os.path.join(output_base, "Completo")
+    os.makedirs(completo_dir, exist_ok=True)
+    print(f"\n{'─' * 64}")
+    print("  Copiando todo a 'Completo/'...")
+    copied = 0
+    for r in all_records:
+        if "dentro de ZIP" in r["Tipo"]:
+            continue
+        src = r["Ruta destino"]
+        dst = os.path.join(completo_dir, r["Nombre archivo"])
+        if os.path.isfile(src) and safe_copy(src, dst):
+            copied += 1
+    print(f"  → {copied} elemento(s) copiado(s) a Completo/")
+
+    print(f"\n{'─' * 64}")
+    save_excel(all_records, output_base, "resumen_global.xlsx")
+
+    print(f"\n{'=' * 64}")
+    print(f"  COMPLETADO  —  {len(all_records)} registros")
+    print(f"  Salida: {output_base}")
+    print(f"{'=' * 64}")
+    print()
+    input("  Presiona Enter para cerrar...")
+
+
 if __name__ == "__main__":
-    main()
+    if "--secundaria" in sys.argv:
+        main_secundaria()
+    else:
+        main_primaria()
