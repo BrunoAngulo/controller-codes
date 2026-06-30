@@ -219,8 +219,8 @@ _DEFAULT_EXCEL_COLS = [
 ]
 
 _SEC_EXCEL_COLS = [
-    "Para", "Nombre visible", "Nombre archivo", "Ruta destino",
-    "Tipo", "Carpeta contenedora", "Carpeta fuente",
+    "Nombre visible", "Nombre archivo", "Ruta destino",
+    "Tipo", "Carpeta contenedora", "Carpeta fuente", "Para",
 ]
 
 
