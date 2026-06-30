@@ -213,18 +213,26 @@ def get_libromedia_title(html_path: str, fallback: str) -> str:
     return fallback
 
 
-def save_excel(records: list, folder: str, filename: str):
+_DEFAULT_EXCEL_COLS = [
+    "Nombre visible", "Nombre archivo", "Ruta destino",
+    "Tipo", "Carpeta contenedora", "Carpeta fuente",
+]
+
+_SEC_EXCEL_COLS = [
+    "Para", "Nombre visible", "Nombre archivo", "Ruta destino",
+    "Tipo", "Carpeta contenedora", "Carpeta fuente",
+]
+
+
+def save_excel(records: list, folder: str, filename: str, cols: list | None = None):
     if not records:
         log("[INFO] Sin registros — Excel no generado.", 2)
         return
     try:
         os.makedirs(folder, exist_ok=True)
-        cols = [
-            "Nombre visible", "Nombre archivo", "Ruta destino",
-            "Tipo", "Carpeta contenedora", "Carpeta fuente",
-        ]
+        out_cols = cols if cols is not None else _DEFAULT_EXCEL_COLS
         out_path = os.path.join(folder, filename)
-        pd.DataFrame(records, columns=cols).to_excel(out_path, index=False)
+        pd.DataFrame(records, columns=out_cols).to_excel(out_path, index=False)
         log(f"[OK] Excel → {out_path}", 2)
     except Exception as exc:
         log(f"[ERROR] Excel: {exc}", 2)
@@ -428,6 +436,7 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
             log(f"[DOC ] {entry}  →  Documentos/", 2)
             if safe_copy(ep, dst):
                 records.append({
+                    "Para":                "SyD",
                     "Nombre visible":      vis_name,
                     "Nombre archivo":      entry,
                     "Ruta destino":        dst,
@@ -479,6 +488,7 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
             log(f"[ZIP ] {lm_name}  →  {unit_label}/", 2)
             if zip_folder(lm_dir, zip_path):
                 records.append({
+                    "Para":                "SyD",
                     "Nombre visible":      vis_name,
                     "Nombre archivo":      zip_name,
                     "Ruta destino":        zip_path,
@@ -503,23 +513,37 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
             continue
 
         try:
-            common = sorted(set(os.listdir(alumno_rec)) & set(os.listdir(profesor_rec)))
+            alumno_set   = set(os.listdir(alumno_rec))
+            profesor_set = set(os.listdir(profesor_rec))
         except Exception as exc:
             log(f"[ERROR] Listando recursos: {exc}", 2)
             continue
 
-        log(f"  Intersección: {len(common)} elemento(s)", 2)
+        all_res = sorted(alumno_set | profesor_set)
+        log(f"  Recursos: {len(all_res)} elemento(s)", 2)
 
-        for res_entry in common:
-            rep = os.path.join(alumno_rec, res_entry)
+        for res_entry in all_res:
+            in_a = res_entry in alumno_set
+            in_p = res_entry in profesor_set
+
+            if in_a and in_p:
+                para = "SyD"
+                rep  = os.path.join(alumno_rec, res_entry)
+            elif in_a:
+                para = "S"
+                rep  = os.path.join(alumno_rec, res_entry)
+            else:
+                para = "D"
+                rep  = os.path.join(profesor_rec, res_entry)
 
             if os.path.isdir(rep):
                 zip_name = f"{res_entry}.zip"
                 zip_path = os.path.join(output_base, unit_label, zip_name)
                 vis_name = html_names.get(res_entry) or res_entry
-                log(f"[ZIP ] {res_entry}  →  {unit_label}/", 2)
+                log(f"[ZIP ] {res_entry} [{para}]  →  {unit_label}/", 2)
                 if zip_folder(rep, zip_path):
                     records.append({
+                        "Para":                para,
                         "Nombre visible":      vis_name,
                         "Nombre archivo":      zip_name,
                         "Ruta destino":        zip_path,
@@ -531,9 +555,10 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
             elif os.path.isfile(rep) and Path(res_entry).suffix.lower() in ALLOWED_EXT:
                 dst      = os.path.join(output_base, unit_label, res_entry)
                 vis_name = find_visible_name(res_entry, html_names)
-                log(f"[DOC ] {res_entry}  →  {unit_label}/", 2)
+                log(f"[DOC ] {res_entry} [{para}]  →  {unit_label}/", 2)
                 if safe_copy(rep, dst):
                     records.append({
+                        "Para":                para,
                         "Nombre visible":      vis_name,
                         "Nombre archivo":      res_entry,
                         "Ruta destino":        dst,
@@ -647,49 +672,54 @@ def main_secundaria():
         input("  Presiona Enter para cerrar...")
         sys.exit(1)
 
-    output_base = resolve_output_base(valid_folders)
-    os.makedirs(output_base, exist_ok=True)
-
-    print(f"\n  Carpetas a procesar : {len(valid_folders)}")
-    print(f"  Salida              : {output_base}\n")
+    print(f"\n  Carpetas a procesar : {len(valid_folders)}\n")
 
     all_records: list = []
+    last_output_base: str = ""
 
     for folder_path in valid_folders:
+        # OUTPUT se crea dentro de cada carpeta arrastrada
+        output_base = os.path.join(folder_path, "OUTPUT")
+        os.makedirs(output_base, exist_ok=True)
+        last_output_base = output_base
+
         label = os.path.basename(folder_path)
         print(f"\n{'─' * 64}")
         print(f"  {label}")
+        print(f"  Salida: {output_base}")
         print(f"{'─' * 64}")
 
         records = process_secondary_folder(folder_path, output_base)
         print(f"  → {len(records)} registro(s)")
         all_records.extend(records)
 
-    if all_records:
-        unidades = sorted({r["Carpeta contenedora"] for r in all_records})
-        print(f"\n  Carpetas generadas en OUTPUT:")
-        for u in unidades:
-            n = sum(1 for r in all_records
-                    if r["Carpeta contenedora"] == u
-                    and "dentro de ZIP" not in r["Tipo"])
-            print(f"   • {u}  ({n} elemento(s))")
+        if records:
+            unidades = sorted({r["Carpeta contenedora"] for r in records})
+            print(f"\n  Carpetas generadas:")
+            for u in unidades:
+                n = sum(1 for r in records
+                        if r["Carpeta contenedora"] == u
+                        and "dentro de ZIP" not in r["Tipo"])
+                print(f"   • {u}  ({n} elemento(s))")
 
-    completo_dir = os.path.join(output_base, "Completo")
-    os.makedirs(completo_dir, exist_ok=True)
-    print(f"\n{'─' * 64}")
-    print("  Copiando todo a 'Completo/'...")
-    copied = 0
-    for r in all_records:
-        if "dentro de ZIP" in r["Tipo"]:
-            continue
-        src = r["Ruta destino"]
-        dst = os.path.join(completo_dir, r["Nombre archivo"])
-        if os.path.isfile(src) and safe_copy(src, dst):
-            copied += 1
-    print(f"  → {copied} elemento(s) copiado(s) a Completo/")
+        completo_dir = os.path.join(output_base, "Completo")
+        os.makedirs(completo_dir, exist_ok=True)
+        print(f"\n{'─' * 64}")
+        print("  Copiando todo a 'Completo/'...")
+        copied = 0
+        for r in records:
+            if "dentro de ZIP" in r["Tipo"]:
+                continue
+            src = r["Ruta destino"]
+            dst = os.path.join(completo_dir, r["Nombre archivo"])
+            if os.path.isfile(src) and safe_copy(src, dst):
+                copied += 1
+        print(f"  → {copied} elemento(s) copiado(s) a Completo/")
 
-    print(f"\n{'─' * 64}")
-    save_excel(all_records, output_base, "resumen_global.xlsx")
+        print(f"\n{'─' * 64}")
+        save_excel(records, output_base, "resumen_global.xlsx", cols=_SEC_EXCEL_COLS)
+
+    output_base = last_output_base
 
     print(f"\n{'=' * 64}")
     print(f"  COMPLETADO  —  {len(all_records)} registros")
