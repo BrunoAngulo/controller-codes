@@ -482,11 +482,15 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
                 profesor_dir = sp
 
         # ZIP LMLA* y LMTE*
+        unit_num = int(entry)
         for lm_dir in zip_dirs:
             lm_name  = os.path.basename(lm_dir)
             zip_name = f"{lm_name}.zip"
             zip_path = os.path.join(output_base, unit_label, zip_name)
-            vis_name = html_names.get(lm_name) or lm_name
+            if lm_name.upper().startswith("LMTE"):
+                vis_name = f"Texto Escolar U{unit_num}"
+            else:
+                vis_name = f"Libro de Actividades U{unit_num}"
             log(f"[ZIP ] {lm_name}  →  {unit_label}/", 2)
             if zip_folder(lm_dir, zip_path):
                 records.append({
