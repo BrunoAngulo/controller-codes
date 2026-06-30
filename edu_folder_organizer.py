@@ -194,6 +194,35 @@ def collect_all_html_names(root_path: str) -> dict:
     return names
 
 
+def expand_zip_targets(dir_path: str, html_names: dict) -> list:
+    """
+    Determina las subcarpetas reales a zipear dentro de dir_path.
+
+    Si dir_path mismo aparece como clave en html_names (tiene su propio
+    HTML, ej. RA25_ANI1_U01_M1/index.html) se zipea tal cual.
+
+    Si no, pero contiene subcarpetas que sí aparecen en html_names
+    (varias actividades agrupadas en una carpeta contenedora, ej.
+    RA25_ANI_U02_M1/m_ep_07_b1interactivo/index.html y
+    RA25_ANI_U02_M1/m_ep_07_b2interactivo/index.html), se zipea cada
+    subcarpeta por separado para conservar su nombre visible individual.
+    """
+    name = os.path.basename(dir_path.rstrip("\\/"))
+    if name in html_names:
+        return [dir_path]
+    try:
+        subdirs = [
+            e for e in os.listdir(dir_path)
+            if os.path.isdir(os.path.join(dir_path, e))
+        ]
+    except Exception:
+        subdirs = []
+    nested = [os.path.join(dir_path, d) for d in subdirs if d in html_names]
+    if nested:
+        return nested
+    return [dir_path]
+
+
 def get_libromedia_title(html_path: str, fallback: str) -> str:
     if not os.path.isfile(html_path):
         return fallback
@@ -543,20 +572,22 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
                 rep  = os.path.join(profesor_rec, res_entry)
 
             if os.path.isdir(rep):
-                zip_name = f"{res_entry}.zip"
-                zip_path = os.path.join(output_base, unit_label, zip_name)
-                vis_name = html_names.get(res_entry) or res_entry
-                log(f"[ZIP ] {res_entry} [{para}]  →  {unit_label}/", 2)
-                if zip_folder(rep, zip_path):
-                    records.append({
-                        "Para":                para,
-                        "Nombre visible":      vis_name,
-                        "Nombre archivo":      zip_name,
-                        "Ruta destino":        zip_path,
-                        "Tipo":                "CARPETA/ZIP",
-                        "Carpeta contenedora": unit_label,
-                        "Carpeta fuente":      folder_label,
-                    })
+                for zip_src in expand_zip_targets(rep, html_names):
+                    zip_unit_name = os.path.basename(zip_src.rstrip("\\/"))
+                    zip_name = f"{zip_unit_name}.zip"
+                    zip_path = os.path.join(output_base, unit_label, zip_name)
+                    vis_name = html_names.get(zip_unit_name) or zip_unit_name
+                    log(f"[ZIP ] {zip_unit_name} [{para}]  →  {unit_label}/", 2)
+                    if zip_folder(zip_src, zip_path):
+                        records.append({
+                            "Para":                para,
+                            "Nombre visible":      vis_name,
+                            "Nombre archivo":      zip_name,
+                            "Ruta destino":        zip_path,
+                            "Tipo":                "CARPETA/ZIP",
+                            "Carpeta contenedora": unit_label,
+                            "Carpeta fuente":      folder_label,
+                        })
 
             elif os.path.isfile(rep) and Path(res_entry).suffix.lower() in ALLOWED_EXT:
                 dst      = os.path.join(output_base, unit_label, res_entry)
