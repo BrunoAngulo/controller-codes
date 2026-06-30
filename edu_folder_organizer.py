@@ -487,11 +487,10 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
             zip_name = f"{lm_name}.zip"
             zip_path = os.path.join(output_base, unit_label, zip_name)
             vis_name = html_names.get(lm_name) or lm_name
-            para     = "D" if lm_name.upper().startswith("LMTE") else "SyD"
-            log(f"[ZIP ] {lm_name} [{para}]  →  {unit_label}/", 2)
+            log(f"[ZIP ] {lm_name}  →  {unit_label}/", 2)
             if zip_folder(lm_dir, zip_path):
                 records.append({
-                    "Para":                para,
+                    "Para":                "SyD",
                     "Nombre visible":      vis_name,
                     "Nombre archivo":      zip_name,
                     "Ruta destino":        zip_path,
