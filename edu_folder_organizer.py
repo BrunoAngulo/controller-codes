@@ -152,8 +152,10 @@ def extract_html_names(html_path: str) -> dict:
             if not clean:
                 continue
 
-            if re.search(r"/index\.html?$", clean, re.IGNORECASE):
-                fname = os.path.basename(os.path.dirname(clean))
+            if re.search(r"\.html?$", clean, re.IGNORECASE):
+                # Cualquier HTML dentro de una subcarpeta → usar nombre de la carpeta
+                parent = os.path.basename(os.path.dirname(clean))
+                fname  = parent if parent else os.path.basename(clean)
             else:
                 fname = os.path.basename(clean)
 
