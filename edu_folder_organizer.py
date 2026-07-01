@@ -250,11 +250,13 @@ _DEFAULT_EXCEL_COLS = [
 ]
 
 # Secciones con PDFs en IndagaMas: (carpeta_seccion, subcarpeta_pdf)
+# subcarpeta_pdf="" significa que los archivos están directamente en la sección
 _OTROS_PDF_SOURCES = [
     ("documentos", "docs"),
     ("epa",        "pdf"),
     ("imprimible", "pdf"),
     ("guia",       "pdf"),
+    ("doc_prof",   ""),
 ]
 
 _SEC_EXCEL_COLS = [
@@ -648,7 +650,7 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
             continue
 
         html_names = extract_html_names(os.path.join(section_path, "index.html"))
-        pdf_dir    = os.path.join(section_path, pdf_subdir)
+        pdf_dir    = os.path.join(section_path, pdf_subdir) if pdf_subdir else section_path
 
         if not os.path.isdir(pdf_dir):
             log(f"[SKIP] Subcarpeta no encontrada: {section}/{pdf_subdir}/", 2)
@@ -667,10 +669,12 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
             if Path(entry).suffix.lower() not in ALLOWED_EXT:
                 continue
 
-            unit     = get_unit_folder(entry)
-            dst      = os.path.join(output_base, unit, entry)
-            vis_name = find_visible_name(entry, html_names)
-            log(f"[DOC ] {section}/{pdf_subdir}/{entry}  →  {unit}/", 2)
+            unit      = get_unit_folder(entry)
+            dst       = os.path.join(output_base, unit, entry)
+            vis_name  = find_visible_name(entry, html_names)
+            para      = "SyD" if "estu" in entry.lower() else "D"
+            src_label = f"{section}/{pdf_subdir}/{entry}" if pdf_subdir else f"{section}/{entry}"
+            log(f"[DOC ] {src_label} [{para}]  →  {unit}/", 2)
             if safe_copy(ep, dst):
                 records.append({
                     "Nombre visible":      vis_name,
@@ -679,6 +683,7 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
                     "Tipo":                "ARCHIVO",
                     "Carpeta contenedora": unit,
                     "Carpeta fuente":      folder_label,
+                    "Para":               para,
                 })
 
     # ── LibroMedias (ZIP) ────────────────────────────────────────────────
@@ -708,7 +713,7 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
                 lib_html_names.get(entry)
                 or get_libromedia_title(os.path.join(ep, "index.html"), entry)
             )
-            log(f"[ZIP ] {entry}  →  {unit}/", 2)
+            log(f"[ZIP ] {entry} [SyD]  →  {unit}/", 2)
             if zip_folder(ep, zip_path):
                 records.append({
                     "Nombre visible":      vis_name,
@@ -717,6 +722,7 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
                     "Tipo":                "CARPETA/ZIP",
                     "Carpeta contenedora": unit,
                     "Carpeta fuente":      folder_label,
+                    "Para":               "SyD",
                 })
     else:
         log(f"[SKIP] libromedias/LA/ no encontrada", 2)
@@ -946,7 +952,7 @@ def main_otros_primaria():
         print(f"  → {copied} elemento(s) copiado(s) a Completo/")
 
         print(f"\n{'─' * 64}")
-        save_excel(records, output_base, "resumen_global.xlsx")
+        save_excel(records, output_base, "resumen_global.xlsx", cols=_SEC_EXCEL_COLS)
 
     output_base = last_output_base
 
