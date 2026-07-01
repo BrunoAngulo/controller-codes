@@ -249,6 +249,14 @@ _DEFAULT_EXCEL_COLS = [
     "Tipo", "Carpeta contenedora", "Carpeta fuente",
 ]
 
+# Secciones con PDFs en IndagaMas: (carpeta_seccion, subcarpeta_pdf)
+_OTROS_PDF_SOURCES = [
+    ("documentos", "docs"),
+    ("epa",        "pdf"),
+    ("imprimible", "pdf"),
+    ("guia",       "pdf"),
+]
+
 _SEC_EXCEL_COLS = [
     "Nombre visible", "Nombre archivo", "Ruta destino",
     "Tipo", "Carpeta contenedora", "Carpeta fuente", "Para",
@@ -608,6 +616,115 @@ def process_secondary_folder(root_path: str, output_base: str) -> list:
 
 
 # ============================================================
+#  PROCESAMIENTO OTROS PRIMARIA (IndagaMas)
+# ============================================================
+
+def process_otros_primaria(root_path: str, output_base: str) -> list:
+    """
+    Procesa una carpeta con estructura IndagaMas (primaria otros).
+
+    Estructura esperada:
+      root_path/
+        documentos/docs/   ← PDFs, index.html en documentos/
+        epa/pdf/           ← PDFs, index.html en epa/
+        imprimible/pdf/    ← PDFs, index.html en imprimible/
+        guia/pdf/          ← PDFs, index.html en guia/
+        libromedias/
+          LA/
+            LMLAPS1RAU01/  ← se zipea
+            LMLAPS1RAU01_bk/ ← se ignora
+          index.html       ← nombres visibles de los ZIPs
+    """
+    folder_label = os.path.basename(root_path.rstrip("\\/"))
+    records: list = []
+
+    log(f"Procesando (otros primaria): {root_path}", 1)
+
+    # ── PDFs de cada sección ────────────────────────────────────────────
+    for section, pdf_subdir in _OTROS_PDF_SOURCES:
+        section_path = os.path.join(root_path, section)
+        if not os.path.isdir(section_path):
+            log(f"[SKIP] Sección no encontrada: {section}/", 2)
+            continue
+
+        html_names = extract_html_names(os.path.join(section_path, "index.html"))
+        pdf_dir    = os.path.join(section_path, pdf_subdir)
+
+        if not os.path.isdir(pdf_dir):
+            log(f"[SKIP] Subcarpeta no encontrada: {section}/{pdf_subdir}/", 2)
+            continue
+
+        try:
+            entries = sorted(os.listdir(pdf_dir))
+        except Exception as exc:
+            log(f"[ERROR] Listando {pdf_dir}: {exc}", 2)
+            continue
+
+        for entry in entries:
+            ep = os.path.join(pdf_dir, entry)
+            if not os.path.isfile(ep):
+                continue
+            if Path(entry).suffix.lower() not in ALLOWED_EXT:
+                continue
+
+            unit     = get_unit_folder(entry)
+            dst      = os.path.join(output_base, unit, entry)
+            vis_name = find_visible_name(entry, html_names)
+            log(f"[DOC ] {section}/{pdf_subdir}/{entry}  →  {unit}/", 2)
+            if safe_copy(ep, dst):
+                records.append({
+                    "Nombre visible":      vis_name,
+                    "Nombre archivo":      entry,
+                    "Ruta destino":        dst,
+                    "Tipo":                "ARCHIVO",
+                    "Carpeta contenedora": unit,
+                    "Carpeta fuente":      folder_label,
+                })
+
+    # ── LibroMedias (ZIP) ────────────────────────────────────────────────
+    libromedia_path = os.path.join(root_path, "libromedias")
+    la_dir          = os.path.join(libromedia_path, "LA")
+    lib_html_names  = extract_html_names(os.path.join(libromedia_path, "index.html"))
+
+    if os.path.isdir(la_dir):
+        try:
+            la_entries = sorted(os.listdir(la_dir))
+        except Exception as exc:
+            log(f"[ERROR] Listando {la_dir}: {exc}", 2)
+            la_entries = []
+
+        for entry in la_entries:
+            ep = os.path.join(la_dir, entry)
+            if not os.path.isdir(ep):
+                continue
+            if entry.lower().endswith("_bk"):
+                log(f"[SKIP] Carpeta _bk ignorada: {entry}", 2)
+                continue
+
+            unit     = get_unit_folder(entry)
+            zip_name = f"{entry}.zip"
+            zip_path = os.path.join(output_base, unit, zip_name)
+            vis_name = (
+                lib_html_names.get(entry)
+                or get_libromedia_title(os.path.join(ep, "index.html"), entry)
+            )
+            log(f"[ZIP ] {entry}  →  {unit}/", 2)
+            if zip_folder(ep, zip_path):
+                records.append({
+                    "Nombre visible":      vis_name,
+                    "Nombre archivo":      zip_name,
+                    "Ruta destino":        zip_path,
+                    "Tipo":                "CARPETA/ZIP",
+                    "Carpeta contenedora": unit,
+                    "Carpeta fuente":      folder_label,
+                })
+    else:
+        log(f"[SKIP] libromedias/LA/ no encontrada", 2)
+
+    return records
+
+
+# ============================================================
 #  MAIN
 # ============================================================
 
@@ -766,8 +883,85 @@ def main_secundaria():
     input("  Presiona Enter para cerrar...")
 
 
+def main_otros_primaria():
+    print("=" * 64)
+    print("   ORGANIZADOR DE CARPETAS EDUCATIVAS — OTROS PRIMARIA")
+    print(f"   {datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}")
+    print("=" * 64)
+
+    raw_args      = [a for a in sys.argv[1:] if a != "--otros-primaria"]
+    valid_folders = [os.path.normpath(a) for a in raw_args if os.path.isdir(a)]
+
+    if not valid_folders:
+        print()
+        print("  No se recibieron carpetas válidas.")
+        print()
+        print("  Formas de uso:")
+        print("   1. Arrastra carpetas sobre 'ejecutar_organizador_otros_primaria.bat'")
+        print()
+        input("  Presiona Enter para cerrar...")
+        sys.exit(1)
+
+    print(f"\n  Carpetas a procesar : {len(valid_folders)}\n")
+
+    all_records: list = []
+    last_output_base: str = ""
+
+    for folder_path in valid_folders:
+        output_base = os.path.join(folder_path, "OUTPUT")
+        os.makedirs(output_base, exist_ok=True)
+        last_output_base = output_base
+
+        label = os.path.basename(folder_path)
+        print(f"\n{'─' * 64}")
+        print(f"  {label}")
+        print(f"  Salida: {output_base}")
+        print(f"{'─' * 64}")
+
+        records = process_otros_primaria(folder_path, output_base)
+        print(f"  → {len(records)} registro(s)")
+        all_records.extend(records)
+
+        if records:
+            unidades = sorted({r["Carpeta contenedora"] for r in records})
+            print(f"\n  Carpetas generadas:")
+            for u in unidades:
+                n = sum(1 for r in records
+                        if r["Carpeta contenedora"] == u
+                        and "dentro de ZIP" not in r["Tipo"])
+                print(f"   • {u}  ({n} elemento(s))")
+
+        completo_dir = os.path.join(output_base, "Completo")
+        os.makedirs(completo_dir, exist_ok=True)
+        print(f"\n{'─' * 64}")
+        print("  Copiando todo a 'Completo/'...")
+        copied = 0
+        for r in records:
+            if "dentro de ZIP" in r["Tipo"]:
+                continue
+            src = r["Ruta destino"]
+            dst = os.path.join(completo_dir, r["Nombre archivo"])
+            if os.path.isfile(src) and safe_copy(src, dst):
+                copied += 1
+        print(f"  → {copied} elemento(s) copiado(s) a Completo/")
+
+        print(f"\n{'─' * 64}")
+        save_excel(records, output_base, "resumen_global.xlsx")
+
+    output_base = last_output_base
+
+    print(f"\n{'=' * 64}")
+    print(f"  COMPLETADO  —  {len(all_records)} registros")
+    print(f"  Salida: {output_base}")
+    print(f"{'=' * 64}")
+    print()
+    input("  Presiona Enter para cerrar...")
+
+
 if __name__ == "__main__":
     if "--secundaria" in sys.argv:
         main_secundaria()
+    elif "--otros-primaria" in sys.argv:
+        main_otros_primaria()
     else:
         main_primaria()
