@@ -250,11 +250,13 @@ _DEFAULT_EXCEL_COLS = [
 ]
 
 # Secciones con PDFs en IndagaMas: (carpeta_seccion, subcarpeta_pdf)
+# subcarpeta_pdf="" significa que los archivos están directamente en la sección
 _OTROS_PDF_SOURCES = [
     ("documentos", "docs"),
     ("epa",        "pdf"),
     ("imprimible", "pdf"),
     ("guia",       "pdf"),
+    ("doc_prof",   ""),
 ]
 
 _SEC_EXCEL_COLS = [
@@ -648,7 +650,7 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
             continue
 
         html_names = extract_html_names(os.path.join(section_path, "index.html"))
-        pdf_dir    = os.path.join(section_path, pdf_subdir)
+        pdf_dir    = os.path.join(section_path, pdf_subdir) if pdf_subdir else section_path
 
         if not os.path.isdir(pdf_dir):
             log(f"[SKIP] Subcarpeta no encontrada: {section}/{pdf_subdir}/", 2)
@@ -670,7 +672,8 @@ def process_otros_primaria(root_path: str, output_base: str) -> list:
             unit     = get_unit_folder(entry)
             dst      = os.path.join(output_base, unit, entry)
             vis_name = find_visible_name(entry, html_names)
-            log(f"[DOC ] {section}/{pdf_subdir}/{entry}  →  {unit}/", 2)
+            src_label = f"{section}/{pdf_subdir}/{entry}" if pdf_subdir else f"{section}/{entry}"
+            log(f"[DOC ] {src_label}  →  {unit}/", 2)
             if safe_copy(ep, dst):
                 records.append({
                     "Nombre visible":      vis_name,
